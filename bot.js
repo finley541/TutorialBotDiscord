@@ -6,8 +6,6 @@ const AntiSpam = require("discord-anti-spam");
 const winston = require("winston");
 const flatted = require("flatted");
 
-process.send = process.send || function () {}; // avoid error when no parent process
-
 const logger = winston.createLogger({
     level: "info",
     format: winston.format.json(),
@@ -18,12 +16,6 @@ const logger = winston.createLogger({
         new winston.transports.File({
             filename: path.join(__dirname, "/botErrors.log"),
             level: "error",
-            format: winston.format.combine(
-                winston.format.timestamp({
-                    format: "YYYY-MM-DD hh:mm:ss A ZZ",
-                }),
-                winston.format.json()
-            ),
         }),
         new winston.transports.File({ filename: "combined.log" }),
     ],
@@ -42,25 +34,11 @@ DBS.RulesFile = require("./BotData/Settings/Rules.json");
 DBS.EventsFile = require("./BotData/commands/events");
 DBS.CommandsFile = require("./BotData/commands/commands");
 DBS.UserFile = __dirname + "/BotData/user/user.json";
-
-console.log(DBS.RulesFile.obj);
 DBS.antiSpam = new AntiSpam(DBS.RulesFile.obj);
-
-// Discord-Anti-Spam is broken so here's a temp fix
-DBS.antiSpam.options.warnEnabled = DBS.RulesFile.obj.warnEnabled;
-DBS.antiSpam.options.kickEnabled = DBS.RulesFile.obj.kickEnabled;
-DBS.antiSpam.options.banEnabled = DBS.RulesFile.obj.banEnabled;
-DBS.antiSpam.options.muteEnabled = false;
-DBS.antiSpam.options.errorMessages = false;
-DBS.antiSpam.options.verbose = false;
 
 DBS.Mods = new Map();
 
 DBS.loadMods = async function () {
-    let dir = require("path").join(__dirname, "mods");
-    if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir);
-    }
     require("fs")
         .readdirSync(require("path").join(__dirname, "mods"))
         .forEach((mod) => {
@@ -80,9 +58,7 @@ DBS.checkMessage = async function (message) {
 
     try {
         DBS.EventHandler.Event_Handle(DBS, DBS.EventsFile, 0, "Any Message", message.member);
-        if (DBS.RulesFile.enabled) {
-            DBS.antiSpam.message(message);
-        }
+        DBS.antiSpam.message(message);
 
         if (!message.content.startsWith(prefix)) return;
         const args = message.content.slice(prefix.length).trim().split(/ +/g);
@@ -135,7 +111,7 @@ DBS.checkMessage = async function (message) {
             );
         }
     } catch (error) {
-        DBS.logError({
+        logger.log({
             level: "error",
             message: "Check Message: " + "[" + message.content + "] " + error.stack,
         });
@@ -148,23 +124,21 @@ DBS.callNextAction = async function (command, message, args, index) {
     try {
         var action = command.actions[index];
         var fetchedAction;
-        if (action) {
-            if (action.type) {
-                fetchedAction = DBS.Mods.get(action.type);
-            } else {
-                fetchedAction = null;
-            }
+        if (action.type) {
+            fetchedAction = DBS.Mods.get(action.type);
+        } else {
+            fetchedAction = null;
+        }
 
-            if (!fetchedAction) {
-                var msg = message;
-                msg.content = message.content.slice(DBS.SettingsFile.prefix.length);
-                DBS.MsgHandler.Message_Handle(DBS, msg, command, index, args);
-            } else {
-                fetchedAction.mod(DBS, message, action, args, command, index);
-            }
+        if (!fetchedAction) {
+            var msg = message;
+            msg.content = message.content.slice(DBS.SettingsFile.prefix.length);
+            DBS.MsgHandler.Message_Handle(DBS, msg, command, index, args);
+        } else {
+            fetchedAction.mod(DBS, message, action, args, command, index);
         }
     } catch (error) {
-        DBS.logError({
+        logger.log({
             level: "error",
             message: "Call next action: " + "[" + message.content + "] " + error.stack,
         });
@@ -179,17 +153,13 @@ DBS.callNextEventAction = async function (type, varsE, index) {
 };
 
 DBS.startBot = async function () {
-    await DBS.Bot.login(DBS.SettingsFile.token)
-        .then((value) => {
-            process.send("success");
-        })
-        .catch((e) => {
-            DBS.logError({
-                level: "error",
-                message: "Bot login: " + e,
-            });
-            //process.send("Error: " + e);
+    await DBS.Bot.login(process.env.token).catch((e) => {
+        logger.log({
+            level: "error",
+            message: "Bot login: " + e,
         });
+    });
+    console.log("Bot logged in");
 
     DBS.CheckIfLoaded();
 };
@@ -213,7 +183,7 @@ DBS.CheckIfLoaded = async function () {
 
 DBS.loadBot = async function () {
     await DBS.loadMods().catch((e) => {
-        DBS.logError({
+        logger.log({
             level: "error",
             message: "Loading mods: " + e,
         });
@@ -226,7 +196,7 @@ DBS.Bot.on("guildMemberAdd", (member) => {
     try {
         DBS.EventHandler.Event_Handle(DBS, DBS.EventsFile, 0, "User Joins Server", member);
     } catch (error) {
-        DBS.logError({
+        logger.log({
             level: "error",
             message: "Guild member add: " + error.stack,
         });
@@ -236,7 +206,7 @@ DBS.Bot.on("guildMemberRemove", (member) => {
     try {
         DBS.EventHandler.Event_Handle(DBS, DBS.EventsFile, 0, "User Kicked", member);
     } catch (error) {
-        DBS.logError({
+        logger.log({
             level: "error",
             message: "Guild member remove: " + error.stack,
         });
@@ -249,7 +219,7 @@ DBS.Bot.on("guildBanAdd", (guild, user) => {
     try {
         DBS.EventHandler.Event_Handle(DBS, DBS.EventsFile, 0, "User Banned", banVars);
     } catch (error) {
-        DBS.logError({
+        logger.log({
             level: "error",
             message: "Guild ban add: " + error.stack,
         });
@@ -300,13 +270,3 @@ process.on("message", (msg) => {
         cleanExit();
     }
 });
-
-process.on("unhandledRejection", (error, p) => {
-    DBS.logError({ level: "error", message: "Unhandled rejection: " + error.stack });
-});
-
-DBS.logError = async function (error) {
-    logger.log(error);
-    process.send(error.message);
-    console.log(error.message);
-};
